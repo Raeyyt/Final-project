@@ -1,0 +1,9 @@
+.env
+.env.local
+*.db
+backend/school_management.db
+backend/**/*.db
+__pycache__/
+*.pyc
+backend/venv/
+backend/.venv/

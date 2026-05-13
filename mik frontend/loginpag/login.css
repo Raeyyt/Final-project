@@ -1,0 +1,133 @@
+/* EB Academy Brand Colors */
+:root {
+    --academy-blue: #0f172a; /* Deep, premium Slate/Blue */
+    --academy-blue-light: #1e293b;
+    --academy-gold: #fbbf24;
+    --white: #ffffff;
+    --bg-light: #ffffff;
+}
+
+body {
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    background-color: var(--bg-light);
+    background-image: radial-gradient(circle at top right, #e0e7ff 0%, transparent 55%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+input,
+select,
+textarea,
+button {
+    font-family: inherit;
+    font-size: inherit;
+}
+
+.login-container {
+    background: var(--academy-blue);
+    width: 100%;
+    max-width: 380px;
+    padding: 40px;
+    border-radius: 20px;
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.5);
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.login-container img {
+    filter: invert(1) brightness(1.2); /* Dynamically turns the black logo entirely white to pop on the dark background! */
+}
+
+h1 {
+    color: var(--white);
+    font-size: 24px;
+    margin-bottom: 5px;
+    letter-spacing: 0.5px;
+}
+
+.subtitle {
+    color: #94a3b8;
+    font-size: 14px;
+    margin-bottom: 30px;
+}
+
+/* Form Styling */
+.input-group {
+    text-align: left;
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: #cbd5e1;
+}
+
+input {
+    width: 100%;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.05); /* Glassmorphism inputs */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--white);
+    border-radius: 8px;
+    box-sizing: border-box;
+    transition: 0.2s;
+}
+
+input::placeholder {
+    color: #475569;
+}
+
+input:focus {
+    outline: none;
+    border-color: var(--academy-gold);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Button Styling */
+.login-btn {
+    background: var(--white);
+    color: #0f172a;
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 15px;
+    transition: 0.3s;
+    box-shadow: 0 4px 15px rgba(255, 255, 255, 0.2);
+}
+
+.login-btn:hover {
+    background: #f1f5f9;
+    transform: translateY(-2px);
+}
+
+.footer-links {
+    margin-top: 25px;
+    font-size: 13px;
+}
+
+.footer-links a {
+    color: #94a3b8;
+    text-decoration: none;
+    transition: 0.2s;
+}
+
+.footer-links a:hover {
+    color: var(--white);
+}
+
+.divider {
+    color: #334155;
+    margin: 0 8px;
+}
