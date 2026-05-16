@@ -1,30 +1,65 @@
+import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from typing import List
 
 from .. import schemas
 from ..database import get_db
-from ..deps import require_roles
-from ..models import SubjectSchedule, User, UserRole, ClassRoom, Student
+from ..deps import require_roles, get_current_user
+from ..models import UserRole
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
+
+def _build_schedule_dict(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    return {
+        "id": d["sch_id"],
+        "class_id": d["sch_class_id"],
+        "teacher_id": d["sch_teacher_id"],
+        "subject_name": d["sch_subject_name"],
+        "day_of_week": d["sch_day_of_week"],
+        "period": d["sch_period"],
+        "class_room": {
+            "id": d["cls_id"],
+            "name": d["cls_name"],
+            "description": d["cls_description"],
+            "teacher_id": d["cls_teacher_id"],
+        },
+        "teacher": {
+            "id": d["usr_id"],
+            "username": d["usr_username"],
+            "full_name": d["usr_full_name"],
+            "role": d["usr_role"],
+            "teaching_title": d["usr_teaching_title"],
+        }
+    }
+
+query_base = """
+    SELECT 
+        s.id as sch_id, s.class_id as sch_class_id, s.teacher_id as sch_teacher_id, 
+        s.subject_name as sch_subject_name, s.day_of_week as sch_day_of_week, s.period as sch_period,
+        c.id as cls_id, c.name as cls_name, c.description as cls_description, c.teacher_id as cls_teacher_id,
+        u.id as usr_id, u.username as usr_username, u.full_name as usr_full_name, 
+        u.role as usr_role, u.teaching_title as usr_teaching_title
+    FROM schedules s
+    JOIN classes c ON s.class_id = c.id
+    JOIN users u ON s.teacher_id = u.id
+"""
 
 @router.post("/", response_model=schemas.ScheduleRead, status_code=status.HTTP_201_CREATED)
 def create_schedule(
     payload: schemas.ScheduleCreate,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
+    db: sqlite3.Connection = Depends(get_db),
+    _: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
 ):
-    # Verify Class and Teacher
-    class_room = db.get(ClassRoom, payload.class_id)
+    class_room = db.execute("SELECT id FROM classes WHERE id = ?", (payload.class_id,)).fetchone()
     if not class_room:
         raise HTTPException(status_code=404, detail="Class not found")
         
-    teacher = db.get(User, payload.teacher_id)
-    if not teacher or teacher.role != UserRole.TEACHER:
+    teacher = db.execute("SELECT id, role, teaching_title FROM users WHERE id = ?", (payload.teacher_id,)).fetchone()
+    if not teacher or teacher["role"] != UserRole.TEACHER.value:
         raise HTTPException(status_code=400, detail="Invalid teacher ID")
 
-    ttitle = (teacher.teaching_title or "").strip()
+    ttitle = (teacher["teaching_title"] or "").strip()
     subj = (payload.subject_name or "").strip()
     if not ttitle:
         raise HTTPException(
@@ -38,83 +73,77 @@ def create_schedule(
             "Use the same name as their teaching title (e.g. Chemistry, Mathematics).",
         )
 
-    # Anti-collision logic: Ensure teacher isn't teaching another class at exactly the same time.
-    conflict = db.query(SubjectSchedule).filter(
-        SubjectSchedule.teacher_id == payload.teacher_id,
-        SubjectSchedule.day_of_week == payload.day_of_week,
-        SubjectSchedule.period == payload.period
-    ).first()
+    conflict = db.execute(
+        "SELECT class_id, subject_name FROM schedules WHERE teacher_id = ? AND day_of_week = ? AND period = ?",
+        (payload.teacher_id, payload.day_of_week, payload.period)
+    ).fetchone()
     
     if conflict:
         raise HTTPException(
             status_code=409, 
-            detail=f"Collision detected: Teacher is already scheduled for {conflict.subject_name} at Class ID {conflict.class_id} on {payload.day_of_week} {payload.period}"
+            detail=f"Collision detected: Teacher is already scheduled for {conflict['subject_name']} at Class ID {conflict['class_id']} on {payload.day_of_week} {payload.period}"
         )
 
-    # Class Collision logic: Ensure class doesn't already have a subject for this period
-    class_conflict = db.query(SubjectSchedule).filter(
-        SubjectSchedule.class_id == payload.class_id,
-        SubjectSchedule.day_of_week == payload.day_of_week,
-        SubjectSchedule.period == payload.period
-    ).first()
+    db.execute(
+        "DELETE FROM schedules WHERE class_id = ? AND day_of_week = ? AND period = ?",
+        (payload.class_id, payload.day_of_week, payload.period)
+    )
 
-    if class_conflict:
-        db.delete(class_conflict) # Overwrite it
-
-    db_schedule = SubjectSchedule(**payload.model_dump())
-    db.add(db_schedule)
+    cursor = db.execute(
+        "INSERT INTO schedules (class_id, teacher_id, subject_name, day_of_week, period) VALUES (?, ?, ?, ?, ?)",
+        (payload.class_id, payload.teacher_id, payload.subject_name, payload.day_of_week, payload.period)
+    )
     db.commit()
-    db.refresh(db_schedule)
-    return db_schedule
+    
+    row = db.execute(query_base + " WHERE s.id = ?", (cursor.lastrowid,)).fetchone()
+    return _build_schedule_dict(row)
 
 @router.get("/classroom/{class_id}", response_model=List[schemas.ScheduleRead])
 def get_class_schedule(
     class_id: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
+    db: sqlite3.Connection = Depends(get_db),
+    _: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
 ):
-    return db.query(SubjectSchedule).filter(SubjectSchedule.class_id == class_id).all()
+    rows = db.execute(query_base + " WHERE s.class_id = ?", (class_id,)).fetchall()
+    return [_build_schedule_dict(r) for r in rows]
 
 @router.get("/my-schedule", response_model=List[schemas.ScheduleRead])
 def get_my_schedule(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.TEACHER)),
+    db: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(require_roles(UserRole.TEACHER)),
 ):
-    return db.query(SubjectSchedule).filter(SubjectSchedule.teacher_id == current_user.id).all()
+    rows = db.execute(query_base + " WHERE s.teacher_id = ?", (current_user["id"],)).fetchall()
+    return [_build_schedule_dict(r) for r in rows]
 
 @router.get("/check-collision")
 def check_schedule_collision(
     teacher_id: int,
     day_of_week: str,
     period: str,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR))
+    db: sqlite3.Connection = Depends(get_db),
+    _: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR))
 ):
-    """Returns whether a teacher is already booked for a specific day and period."""
-    conflict = db.query(SubjectSchedule).filter(
-        SubjectSchedule.teacher_id == teacher_id,
-        SubjectSchedule.day_of_week == day_of_week,
-        SubjectSchedule.period == period
-    ).first()
+    conflict = db.execute(
+        "SELECT class_id, subject_name FROM schedules WHERE teacher_id = ? AND day_of_week = ? AND period = ?",
+        (teacher_id, day_of_week, period)
+    ).fetchone()
     
     if conflict:
-        return {"collision": True, "message": f"Clash: Teacher scheduled for {conflict.subject_name} in Class {conflict.class_id}."}
+        return {"collision": True, "message": f"Clash: Teacher scheduled for {conflict['subject_name']} in Class {conflict['class_id']}."}
     return {"collision": False, "message": "No collision."}
 
 @router.get("/student-subjects/{student_id}", response_model=List[schemas.ScheduleRead])
 def get_student_subjects(
     student_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR, UserRole.PARENT, UserRole.TEACHER))
+    db: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR, UserRole.PARENT, UserRole.TEACHER))
 ):
-    student = db.get(Student, student_id)
+    student = db.execute("SELECT class_id, parent_id FROM students WHERE id = ?", (student_id,)).fetchone()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
         
-    if current_user.role == UserRole.PARENT and student.parent_id != current_user.id:
+    if current_user["role"] == UserRole.PARENT.value and student["parent_id"] != current_user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized to view this student")
         
-    # Return all schedules/subjects for the student's class
-    return db.query(SubjectSchedule).filter(SubjectSchedule.class_id == student.class_id).all()
-
-
+    rows = db.execute(query_base + " WHERE s.class_id = ?", (student["class_id"],)).fetchall()
+    return [_build_schedule_dict(r) for r in rows]

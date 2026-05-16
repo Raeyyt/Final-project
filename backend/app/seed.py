@@ -1,68 +1,36 @@
-"""Optional DB bootstrap: only creates the default admin when the user table is empty."""
-
-from sqlalchemy.orm import Session
-
-from .database import SessionLocal, Base, engine
-from .models import (
-    Announcement,
-    Attendance,
-    ClassRoom,
-    FinancialReport,
-    Payment,
-    Student,
-    SubjectSchedule,
-    User,
-    UserRole,
-)
+import sqlite3
+from .database import DB_PATH
 from .security import get_password_hash
-
-
-def seed():
-    Base.metadata.create_all(bind=engine)
-    db: Session = SessionLocal()
-    try:
-        if db.query(User).count() > 0:
-            return
-
-        admin = User(
-            username="admin",
-            full_name="System Admin",
-            hashed_password=get_password_hash("admin123"),
-            role=UserRole.ADMIN,
-        )
-        db.add(admin)
-        db.commit()
-    finally:
-        db.close()
-
 
 def purge_non_admin_data() -> None:
     """Delete all school records and all users except username ``admin``."""
-    db: Session = SessionLocal()
+    conn = sqlite3.connect(DB_PATH)
     try:
-        db.query(Announcement).delete(synchronize_session=False)
-        db.query(Attendance).delete(synchronize_session=False)
-        db.query(Payment).delete(synchronize_session=False)
-        db.query(SubjectSchedule).delete(synchronize_session=False)
-        db.query(FinancialReport).delete(synchronize_session=False)
-        db.query(Student).delete(synchronize_session=False)
-        db.query(ClassRoom).delete(synchronize_session=False)
-        removed_users = (
-            db.query(User).filter(User.username != "admin").delete(synchronize_session=False)
-        )
-        db.commit()
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("DELETE FROM announcements;")
+        conn.execute("DELETE FROM attendance;")
+        conn.execute("DELETE FROM payments;")
+        conn.execute("DELETE FROM schedules;")
+        conn.execute("DELETE FROM financial_reports;")
+        conn.execute("DELETE FROM students;")
+        conn.execute("DELETE FROM classes;")
+        
+        cursor = conn.execute("DELETE FROM users WHERE username != 'admin';")
+        removed_users = cursor.rowcount
+        
+        conn.commit()
         print(f"Purge complete. Removed linked data and {removed_users} non-admin user(s).")
-    except Exception:
-        db.rollback()
+    except Exception as e:
+        conn.rollback()
+        print(f"Error during purge: {e}")
         raise
     finally:
-        db.close()
+        conn.close()
 
 
 if __name__ == "__main__":
     import sys
-
     if len(sys.argv) > 1 and sys.argv[1] == "--purge":
         purge_non_admin_data()
     else:
-        seed()
+        print("Initialization happens automatically on app startup now.")

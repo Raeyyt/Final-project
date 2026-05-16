@@ -71,7 +71,7 @@ async function showPage(pageName) {
                     <span style="font-size: 12px; color: #64748b; font-weight: normal;">${m.total_students} Enrolled</span>
                 </h4>
                 <div style="display:flex; height:18px; background:#e2e8f0; border-radius:6px; overflow:hidden;">
-                    <div style="width: ${presPct}%; background: linear-gradient(90deg, #7dd3fc 0%, #38bdf8 45%, #0284c7 100%); transition: width 1s;" title="Present: ${m.present_today}"></div>
+                    <div style="width: ${presPct}%; background: #0284c7; transition: width 1s;" title="Present: ${m.present_today}"></div>
                     <div style="width: ${absPct}%; background: #ef4444; transition: width 1s;" title="Absent: ${m.absent_today}"></div>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:11px; margin-top:5px; color:#64748b; font-weight:bold;">
@@ -106,8 +106,10 @@ async function showPage(pageName) {
                         Overdue Payments: <strong style="color:#b91c1c">${stats.payments_overdue}</strong>
                     </p>
                     
+                    ${window._adminPortalRole === 'ADMIN' ? `
                     <h3 style="margin-top: 30px; margin-bottom: 15px; color:#1e293b;">Quick Actions</h3>
                     <button class="btn-add" style="margin-top:10px; background:#ef4444; width:100%;" onclick="resetQuarter()"><i class='bx bx-reset'></i> Reset Quarter</button>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -183,23 +185,21 @@ async function showPage(pageName) {
         
         htmlBlock += `<div style="margin-bottom:20px; display:flex; gap:10px;">
             <input type="text" id="newClassName" placeholder="Class Name (e.g. Grade 10-A)" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px; flex:1;">
-            <input type="text" id="newClassDesc" placeholder="Description" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px; flex:2;">
             <button onclick="createClass()" style="background:#2563eb; color:white; padding:8px 16px; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Add Class</button>
         </div>`;
         
         htmlBlock += `<table style="width:100%; border-collapse:collapse; text-align:left;">`;
-        htmlBlock += `<tr style="border-bottom:1px solid #e2e8f0;"><th style="padding:15px 10px; color:#475569;">Class Name</th><th style="color:#475569;">Description</th><th style="color:#475569;">Assigned Teacher</th><th style="color:#475569;">Action</th></tr>`;
+        htmlBlock += `<tr style="border-bottom:1px solid #e2e8f0;"><th style="padding:15px 10px; color:#475569;">Class Name</th><th style="color:#475569;">Assigned Teacher</th><th style="color:#475569;">Action</th></tr>`;
 
-
+        const assignedTeacherIds = new Set(classes ? classes.map(c => c.teacher_id).filter(id => id !== null) : []);
         if (classes && classes.length > 0) {
             classes.forEach(c => {
                 htmlBlock += `<tr style="border-bottom:1px solid #f8fafc;">
                     <td style="padding:15px 10px; font-weight:600; color:#1e293b;">${c.name}</td>
-                    <td style="color:#64748b;">${c.description || 'N/A'}</td>
                     <td>
                         <select id="teacherSelect_${c.id}" style="padding:8px 12px; border-radius:6px; border:1px solid #cbd5e1; width:220px; outline:none;">
                             <option value="">-- Unassigned --</option>
-                            ${teachers && teachers.length > 0 ? teachers.map(t => `<option value="${t.id}" ${c.teacher_id === t.id ? 'selected' : ''}>${t.full_name}${t.teaching_title ? ' — ' + t.teaching_title : ''}</option>`).join('') : ''}
+                            ${teachers && teachers.length > 0 ? teachers.filter(t => !assignedTeacherIds.has(t.id) || c.teacher_id === t.id).map(t => `<option value="${t.id}" ${c.teacher_id === t.id ? 'selected' : ''}>${t.full_name}${t.teaching_title ? ' — ' + t.teaching_title : ''}</option>`).join('') : ''}
                         </select>
                     </td>
                     <td>
@@ -209,7 +209,7 @@ async function showPage(pageName) {
                 </tr>`;
             });
         } else {
-            htmlBlock += `<tr><td colspan="4" style="padding:20px; text-align:center;">No classrooms found natively.</td></tr>`;
+            htmlBlock += `<tr><td colspan="3" style="padding:20px; text-align:center;">No classrooms found natively.</td></tr>`;
         }
 
         htmlBlock += `</table></div>`;
@@ -217,9 +217,8 @@ async function showPage(pageName) {
         
         window.createClass = async () => {
             const name = document.getElementById('newClassName').value;
-            const desc = document.getElementById('newClassDesc').value;
             if (!name) return alert("Class name required");
-            const res = await fetchAPI("/classes/", { method: "POST", body: JSON.stringify({ name: name, description: desc }) });
+            const res = await fetchAPI("/classes/", { method: "POST", body: JSON.stringify({ name: name }) });
             if (res) showPage('classes');
             else alert("Failed to create class. Name might already exist.");
         };
@@ -312,7 +311,6 @@ async function showPage(pageName) {
 
         let htmlBlock = `<h2>Student roster & academic year</h2>`;
         htmlBlock += `<div class="admin-students-card">`;
-
         htmlBlock += `<div class="admin-students-year-filter">
             <label for="adminStudentYearFilter">Filter by academic year:</label>
             <select id="adminStudentYearFilter" onchange="window._adminStudentYearFilter=this.value;showPage('students');">
@@ -340,33 +338,18 @@ async function showPage(pageName) {
                     </select>
                 </div>
                 <div class="admin-field">
-                    <label for="newStdParent">Linked parent</label>
-                    <select id="newStdParent" title="Required for Chapa registration invoice">
-                        <option value="">— No parent —</option>
-                        ${parentOptionsNew}
-                    </select>
+                    <label for="newStdParentInput">Linked parent</label>
+                    <input type="text" id="newStdParentInput" list="parentsDatalist" placeholder="Search parent name..." autocomplete="off" title="Required for Chapa registration invoice">
+                    <datalist id="parentsDatalist">
+                        ${parents && parents.length ? parents.map(p => `<option value="${p.full_name} (${p.username}) - ID:${p.id}"></option>`).join("") : ""}
+                    </datalist>
                 </div>
                 <div class="admin-field admin-field--span2">
                     <label for="newStdYear">Academic year</label>
                     <input type="text" id="newStdYear" placeholder="e.g. 2026-2027" value="${defaultYear}" title="Defaults to the current school year; edit if needed.">
                 </div>
             </div>
-            <div class="admin-invoice-panel">
-                <label class="admin-check" for="newStdRegInvoice">
-                    <input type="checkbox" id="newStdRegInvoice" onchange="toggleNewStdRegInvoice()">
-                    <span>Create registration fee invoice (parent pays via Chapa)</span>
-                </label>
-                <div id="newStdRegInvoiceFields" class="admin-invoice-fields">
-                    <div class="admin-field">
-                        <label for="newStdRegAmount">Amount (ETB)</label>
-                        <input type="number" id="newStdRegAmount" min="1" step="1" placeholder="e.g. 5000">
-                    </div>
-                    <div class="admin-field">
-                        <label for="newStdRegDue">Due date</label>
-                        <input type="date" id="newStdRegDue" value="${regDueDefault}">
-                    </div>
-                </div>
-            </div>
+
             <div class="admin-form-actions">
                 <button type="button" class="admin-btn-register" onclick="createStudent()">Register new student</button>
             </div>
@@ -376,11 +359,11 @@ async function showPage(pageName) {
             <h3>Re-enroll existing student</h3>
             <div class="admin-form-grid">
                 <div class="admin-field admin-field--span2">
-                    <label for="reEnrollStudentId">Student</label>
-                    <select id="reEnrollStudentId">
-                        <option value="">Select existing student…</option>
-                        ${students && students.length ? students.map(s => `<option value="${s.id}">${s.first_name} ${s.last_name} (${s.academic_year || '—'})</option>`).join('') : ''}
-                    </select>
+                    <label for="reEnrollStudentInput">Student</label>
+                    <input type="text" id="reEnrollStudentInput" list="studentsDatalist" placeholder="Search student name..." autocomplete="off">
+                    <datalist id="studentsDatalist">
+                        ${students && students.length ? students.map(s => `<option value="${s.first_name} ${s.last_name} (${s.academic_year || '—'}) - ID:${s.id}"></option>`).join('') : ''}
+                    </datalist>
                 </div>
                 <div class="admin-field">
                     <label for="reEnrollClassId">New class</label>
@@ -413,9 +396,21 @@ async function showPage(pageName) {
             </div>
         </div>`;
 
+        htmlBlock += `<div style="display:flex; justify-content:space-between; align-items:center; margin: 20px 0 10px 0;">
+            <div>
+                <input type="text" id="adminStudentSearchName" placeholder="Search students by name..." onkeyup="filterAdminStudentsTable()" style="padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; width: 250px; font-size: 14px;">
+            </div>
+            <div>
+                <select id="adminStudentClassFilter" onchange="filterAdminStudentsTable()" style="padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; min-width: 150px;">
+                    <option value="">All Classes</option>
+                    ${classes ? classes.map(c => `<option value="${c.name}">${c.name}</option>`).join('') : ''}
+                </select>
+            </div>
+        </div>`;
         htmlBlock += `<div class="admin-table-scroll"><table class="admin-students-table"><thead><tr>
             <th>Name</th>
             <th>Academic year</th>
+            <th>Status</th>
             <th>Class</th>
             <th>Parent</th>
             <th>Reassign class</th>
@@ -430,7 +425,8 @@ async function showPage(pageName) {
                 htmlBlock += `<tr>
                     <td class="col-name">${s.first_name} ${s.last_name}</td>
                     <td class="col-narrow">${s.academic_year || '—'}</td>
-                    <td>${s.class_room.name}</td>
+                    <td>${s.is_active ? '<span style="color:#16a34a; font-weight:bold;">Active</span>' : '<span style="color:#eab308; font-weight:bold;">Pending</span>'}</td>
+                    <td class="col-class">${s.class_room.name}</td>
                     <td><select id="parentSelect_${s.id}"><option value="">None</option>${pOpt}</select></td>
                     <td><select id="classSelect_${s.id}">${cOpt}</select></td>
                     <td>
@@ -442,17 +438,31 @@ async function showPage(pageName) {
                 </tr>`;
             });
         } else {
-            htmlBlock += `<tr><td colspan="6" style="padding:24px; text-align:center; color:#64748b;">No students found for this filter.</td></tr>`;
+            htmlBlock += `<tr><td colspan="7" style="padding:24px; text-align:center; color:#64748b;">No students found for this filter.</td></tr>`;
         }
         
         htmlBlock += `</tbody></table></div></div>`;
         content.innerHTML = htmlBlock;
 
-        window.toggleNewStdRegInvoice = function () {
-            const box = document.getElementById("newStdRegInvoice");
-            const wrap = document.getElementById("newStdRegInvoiceFields");
-            if (!box || !wrap) return;
-            wrap.classList.toggle("admin-invoice-fields--visible", box.checked);
+        window.filterAdminStudentsTable = () => {
+            const nameInput = document.getElementById('adminStudentSearchName')?.value.toLowerCase() || '';
+            const classInput = document.getElementById('adminStudentClassFilter')?.value || '';
+            const table = document.querySelector('.admin-students-table tbody');
+            if (!table) return;
+            const rows = table.getElementsByTagName('tr');
+            for (let i = 0; i < rows.length; i++) {
+                const nameCol = rows[i].querySelector('.col-name');
+                const classCol = rows[i].querySelector('.col-class');
+                if (nameCol && classCol) {
+                    const textName = nameCol.textContent || nameCol.innerText;
+                    const textClass = classCol.textContent || classCol.innerText;
+                    
+                    const matchesName = textName.toLowerCase().indexOf(nameInput) > -1;
+                    const matchesClass = classInput === "" || textClass.trim() === classInput;
+                    
+                    rows[i].style.display = (matchesName && matchesClass) ? '' : 'none';
+                }
+            }
         };
 
         window.createStudent = async () => {
@@ -460,23 +470,16 @@ async function showPage(pageName) {
             const last = document.getElementById('newStdLast').value;
             const classId = document.getElementById('newStdClass').value;
             const yr = document.getElementById('newStdYear').value.trim();
-            const parentEl = document.getElementById('newStdParent');
-            const parentVal = parentEl ? parentEl.value : '';
+            const parentInput = document.getElementById('newStdParentInput')?.value || '';
+            const parentMatch = parentInput.match(/- ID:(\d+)$/);
+            const parentVal = parentMatch ? parentMatch[1] : '';
             if (!first || !last || !classId) return alert("First name, Last Name, and Class required");
             const payload = { first_name: first, last_name: last, class_id: parseInt(classId) };
             if (yr) payload.academic_year = yr;
             if (parentVal) payload.parent_id = parseInt(parentVal, 10);
 
-            const regInv = document.getElementById('newStdRegInvoice')?.checked;
-            if (regInv) {
-                if (!parentVal) return alert("Select a parent account so they can see and pay the registration invoice.");
-                const amt = parseFloat(String(document.getElementById('newStdRegAmount')?.value || '').trim());
-                if (!amt || amt <= 0) return alert("Enter a registration fee amount greater than zero.");
-                payload.create_registration_invoice = true;
-                payload.registration_fee_amount = amt;
-                const due = document.getElementById('newStdRegDue')?.value;
-                if (due) payload.registration_due_date = due;
-            }
+            if (!parentVal) return alert("Select a linked parent so the Accountant can process the registration fee and the parent can pay.");
+            payload.create_registration_invoice = true;
 
             const res = await fetchAPI("/students/", { method: "POST", body: JSON.stringify(payload) });
             if (res && res.id) {
@@ -494,7 +497,10 @@ async function showPage(pageName) {
         };
 
         window.reEnrollExistingStudent = async () => {
-            const sid = document.getElementById('reEnrollStudentId').value;
+            const studentInput = document.getElementById('reEnrollStudentInput')?.value || '';
+            const studentMatch = studentInput.match(/- ID:(\d+)$/);
+            const sid = studentMatch ? studentMatch[1] : '';
+            
             const cid = document.getElementById('reEnrollClassId').value;
             const yr = document.getElementById('reEnrollYear').value.trim();
             if (!sid || !cid || !yr) return alert("Select a student, new class, and academic year.");
@@ -802,13 +808,10 @@ async function showPage(pageName) {
         if (rangeEl) rangeEl.addEventListener("change", runChart);
         setTimeout(runChart, 80);
     } else if (pageName === "announcements") {
-        if (window._adminPortalRole !== "ADMIN") {
-            alert("Announcements are managed by administrators only.");
-            showPage("dashboard");
-            return;
-        }
         const list = await fetchAPI("/announcements/");
+        const classes = await fetchAPI("/classes/");
         const items = Array.isArray(list) ? list : [];
+        const classesList = Array.isArray(classes) ? classes : [];
         const esc = (s) =>
             String(s ?? "")
                 .replace(/&/g, "&amp;")
@@ -821,8 +824,9 @@ async function showPage(pageName) {
                 : items
                       .map((a) => {
                           const when = new Date(a.created_at).toLocaleString();
+                          const targetBadge = a.target_class_name ? `<span style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:12px; font-size:12px; margin-left:10px;">${esc(a.target_class_name)}</span>` : `<span style="background:#f1f5f9; color:#475569; padding:2px 8px; border-radius:12px; font-size:12px; margin-left:10px;">All Parents</span>`;
                           return `<article class="admin-announce-card">
-                            <header><strong>${esc(a.title)}</strong><span>${esc(when)} · ${esc(a.author_name)}</span></header>
+                            <header><strong>${esc(a.title)}</strong>${targetBadge}<span>${esc(when)} · ${esc(a.author_name)}</span></header>
                             <div class="admin-announce-body">${esc(a.body)}</div>
                           </article>`;
                       })
@@ -831,6 +835,11 @@ async function showPage(pageName) {
             <h2 style="margin:0 0 20px 0;color:#1e293b;">Parent announcements</h2>
             <div style="background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:24px;max-width:720px;">
                 <h3 style="margin:0 0 14px 0;font-size:16px;color:#1e293b;">New announcement</h3>
+                <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">Target Audience</label>
+                <select id="adminAnnTargetClass" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:14px;font-size:14px;background:#f8fafc;">
+                    <option value="">All Parents (School-wide)</option>
+                    ${classesList.map(c => `<option value="${c.id}">Class: ${c.name}</option>`).join('')}
+                </select>
                 <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">Title</label>
                 <input type="text" id="adminAnnTitle" maxlength="200" placeholder="e.g. School closed — public holiday"
                     style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:14px;font-size:14px;">
@@ -838,7 +847,7 @@ async function showPage(pageName) {
                 <textarea id="adminAnnBody" rows="6" maxlength="4000" placeholder="Write the message parents should read…"
                     style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;resize:vertical;"></textarea>
                 <button type="button" class="admin-btn-register" style="margin-top:14px;" onclick="postAdminAnnouncement()">
-                    <i class='bx bx-send'></i> Send to all parents
+                    <i class='bx bx-send'></i> Send Announcement
                 </button>
             </div>
             <h3 style="margin:0 0 12px 0;font-size:16px;color:#1e293b;">Posted (newest first)</h3>
@@ -848,10 +857,13 @@ async function showPage(pageName) {
         window.postAdminAnnouncement = async () => {
             const title = document.getElementById("adminAnnTitle")?.value.trim();
             const body = document.getElementById("adminAnnBody")?.value.trim();
+            const targetClassStr = document.getElementById("adminAnnTargetClass")?.value;
+            const target_class_id = targetClassStr ? parseInt(targetClassStr) : null;
+            
             if (!title || !body) return alert("Enter both a title and a message.");
             const res = await fetchAPI("/announcements/", {
                 method: "POST",
-                body: JSON.stringify({ title, body }),
+                body: JSON.stringify({ title, body, target_class_id }),
             });
             if (res && res.id) {
                 alert("Announcement published. Parents will see it under Announcements.");
@@ -865,7 +877,7 @@ async function showPage(pageName) {
                       : det
                         ? JSON.stringify(det)
                         : "";
-                alert(line || "Could not publish. Ensure you are logged in as an administrator.");
+                alert(line || "Could not publish. Ensure you have the required permissions.");
             }
         };
     }
@@ -1178,8 +1190,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         const r = me && me.role ? String(me.role).trim().toUpperCase() : "";
         window._adminPortalRole = r;
-        const navAnn = document.getElementById("nav-admin-announcements");
-        if (navAnn) navAnn.style.display = r === "ADMIN" ? "" : "none";
+        
+        if (r === "ADMIN") {
+            const ids = ["nav-schedules", "nav-classes", "nav-students", "nav-payments", "nav-attendance", "nav-announcements"];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = "none";
+            });
+        } else if (r === "DIRECTOR") {
+            const navUsers = document.getElementById("nav-users");
+            if (navUsers) navUsers.style.display = "none";
+        }
+        
         await showPage("dashboard");
     } catch (err) {
         console.error("Admin portal failed to initialize", err);

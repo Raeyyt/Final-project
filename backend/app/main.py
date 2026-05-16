@@ -2,14 +2,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .database import Base, engine
-from .migrate import apply_all_migrations
+from .database import DB_PATH
 from .routers import auth, students, attendance, payments, dashboard, teachers, accountants, classes, schedules, reports, announcements
-from .seed import seed
+import sqlite3
+import os
 
-Base.metadata.create_all(bind=engine)
-apply_all_migrations()
-seed()
+def init_db():
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    schema_path = os.path.join(BASE_DIR, "schema.sql")
+    if os.path.exists(schema_path):
+        with open(schema_path, "r", encoding="utf-8") as f:
+            schema_script = f.read()
+        conn = sqlite3.connect(DB_PATH)
+        conn.executescript(schema_script)
+        conn.commit()
+        conn.close()
+
+init_db()
 
 app = FastAPI(title=settings.app_name)
 

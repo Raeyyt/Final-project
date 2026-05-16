@@ -1,36 +1,39 @@
+import sqlite3
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import desc
-from sqlalchemy.orm import Session, joinedload
+from typing import List
 
 from .. import schemas
 from ..deps import get_current_user, get_db, require_roles
-from ..models import Announcement, User, UserRole
+from ..models import UserRole
 
 router = APIRouter(prefix="/announcements", tags=["announcements"])
 
 
-def _serialize(row: Announcement) -> schemas.AnnouncementRead:
-    return schemas.AnnouncementRead(
-        id=row.id,
-        title=row.title,
-        body=row.body,
-        created_at=row.created_at,
-        author_name=row.author.full_name,
-    )
-
-
 @router.get("/", response_model=list[schemas.AnnouncementRead])
 def list_announcements(
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    db: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    rows = (
-        db.query(Announcement)
-        .options(joinedload(Announcement.author))
-        .order_by(desc(Announcement.created_at))
-        .all()
-    )
-    return [_serialize(r) for r in rows]
+    query = """
+        SELECT a.id, a.title, a.body, a.created_at, a.target_class_id, u.full_name as author_name, c.name as target_class_name
+        FROM announcements a
+        JOIN users u ON a.author_id = u.id
+        LEFT JOIN classes c ON a.target_class_id = c.id
+    """
+    params = []
+    
+    if current_user["role"] == UserRole.PARENT.value:
+        query += """
+        WHERE a.target_class_id IS NULL OR a.target_class_id IN (
+            SELECT class_id FROM students WHERE parent_id = ? AND is_active = 1
+        )
+        """
+        params.append(current_user["id"])
+        
+    query += " ORDER BY a.created_at DESC"
+    
+    rows = db.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
 
 
 @router.post(
@@ -40,21 +43,21 @@ def list_announcements(
 )
 def create_announcement(
     data: schemas.AnnouncementCreate,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN)),
+    db: sqlite3.Connection = Depends(get_db),
+    admin: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
 ):
-    ann = Announcement(
-        title=data.title.strip(),
-        body=data.body.strip(),
-        author_id=admin.id,
+    cursor = db.execute(
+        "INSERT INTO announcements (title, body, author_id, target_class_id) VALUES (?, ?, ?, ?)",
+        (data.title.strip(), data.body.strip(), admin["id"], data.target_class_id)
     )
-    db.add(ann)
     db.commit()
-    db.refresh(ann)
-    ann = (
-        db.query(Announcement)
-        .options(joinedload(Announcement.author))
-        .filter(Announcement.id == ann.id)
-        .one()
-    )
-    return _serialize(ann)
+    
+    query = """
+        SELECT a.id, a.title, a.body, a.created_at, a.target_class_id, u.full_name as author_name, c.name as target_class_name
+        FROM announcements a
+        JOIN users u ON a.author_id = u.id
+        LEFT JOIN classes c ON a.target_class_id = c.id
+        WHERE a.id = ?
+    """
+    row = db.execute(query, (cursor.lastrowid,)).fetchone()
+    return dict(row)

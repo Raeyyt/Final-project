@@ -54,6 +54,7 @@ function showSection(sectionId) {
     const navIdMap = {
         'finance': 'nav-fin',
         'students': 'nav-stud',
+        'registrations': 'nav-reg',
         'reports': 'nav-rep',
         'verify': 'nav-ver'
     };
@@ -63,6 +64,7 @@ function showSection(sectionId) {
     
     if(sectionId === 'reports') generateReport();
     if(sectionId === 'dashboard') renderDashboard();
+    if(sectionId === 'registrations') renderRegistrations();
 }
 
 window.initiateVerificationTrace = async () => {
@@ -206,6 +208,80 @@ async function generateInvoices() {
         document.querySelector('.fee-card .submit-btn').innerText = "Run Target Invoice Generation";
     }
 }
+
+window.renderRegistrations = function() {
+    const tbody = document.getElementById('registrationsBody');
+    if (!tbody) return;
+
+    // A registration fee payment is PENDING, amount_due is 0, and invoice_title is "Registration fee"
+    const pendingRegs = globalPayments.filter(p => p.status === 'PENDING' && p.amount_due === 0 && p.invoice_title === 'Registration fee');
+
+    if (pendingRegs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#64748b;">No pending registrations at this time.</td></tr>';
+        return;
+    }
+
+    const defaultDue = new Date();
+    defaultDue.setDate(defaultDue.getDate() + 14);
+    const defaultDueStr = defaultDue.toISOString().split('T')[0];
+
+    tbody.innerHTML = pendingRegs.map(p => {
+        const studentName = p.student ? `${p.student.first_name} ${p.student.last_name}` : 'Unknown';
+        const className = p.student && p.student.class_room ? p.student.class_room.name : 'Unknown';
+        
+        return `
+            <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="font-weight:600; color:#1e293b; padding:15px 10px;">${studentName}</td>
+                <td><span style="background:#f1f5f9; padding:4px 8px; border-radius:4px; font-size:12px;">${className}</span></td>
+                <td>
+                    <input type="number" id="regAmt_${p.id}" placeholder="e.g. 5000" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px; width:120px;" min="1">
+                </td>
+                <td>
+                    <input type="date" id="regDue_${p.id}" value="${defaultDueStr}" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;">
+                </td>
+                <td>
+                    <button class="submit-btn" style="background:#10b981; padding:8px 16px; margin:0;" onclick="approveRegistration(${p.id})">Approve Fee</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+};
+
+window.approveRegistration = async function(paymentId) {
+    const amtInput = document.getElementById(`regAmt_${paymentId}`);
+    const dueInput = document.getElementById(`regDue_${paymentId}`);
+    
+    if (!amtInput || !dueInput) return;
+    
+    const amount = parseFloat(amtInput.value);
+    const due = dueInput.value;
+    
+    if (isNaN(amount) || amount <= 0) {
+        return alert("Please enter a valid fee amount.");
+    }
+    if (!due) {
+        return alert("Please enter a due date.");
+    }
+    
+    if (!confirm(`Set registration fee to ${amount} ETB due by ${due}?`)) return;
+    
+    try {
+        const res = await fetchAPI(`/payments/${paymentId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ amount_due: amount, due_date: due })
+        });
+        
+        if (res) {
+            alert("Registration fee applied. The parent can now see the invoice and pay via Chapa.");
+            await fetchAndRenderPayments();
+            renderRegistrations();
+        } else {
+            alert("Failed to update registration fee.");
+        }
+    } catch (e) {
+        alert("An error occurred while approving registration.");
+    }
+};
 
 window.exportFinanceCSV = function() {
     let csvContent = "data:text/csv;charset=utf-8,";

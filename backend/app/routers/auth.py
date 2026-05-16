@@ -1,129 +1,131 @@
 import logging
-
+import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from .. import schemas
-from ..database import engine
-from ..models import User, UserRole
-from ..security import verify_password, create_access_token
+from ..models import UserRole
+from ..security import verify_password, create_access_token, get_password_hash
 from ..deps import get_db, get_current_user, require_roles
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 logger = logging.getLogger("auth")
 logger.setLevel(logging.INFO)
-logger.info("Auth router using DB url: %s", engine.url)
 
 
 @router.post("/login", response_model=schemas.Token)
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
+    db: sqlite3.Connection = Depends(get_db),
 ):
     logger.info("Login attempt for username='%s'", form_data.username)
-    user: User | None = (
-        db.query(User).filter(User.username == form_data.username).first()
-    )
+    
+    user = db.execute("SELECT * FROM users WHERE username = ?", (form_data.username,)).fetchone()
+    
     if user:
-        logger.info("User '%s' found with role %s", user.username, user.role)
+        user = dict(user)
+        logger.info("User '%s' found with role %s", user["username"], user["role"])
     else:
         logger.warning("User '%s' not found in DB", form_data.username)
-    if not user or not verify_password(form_data.password, user.hashed_password):
+        
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
     token = create_access_token(
-        {"sub": user.username, "role": user.role}
+        {"sub": user["username"], "role": user["role"]}
     )
     return {"access_token": token, "token_type": "bearer"}
 
 
 @router.get("/me", response_model=schemas.UserRead)
-def read_current_user(current_user: User = Depends(get_current_user)):
+def read_current_user(current_user: dict = Depends(get_current_user)):
     return current_user
 
 @router.get("/users", response_model=list[schemas.UserRead])
 def get_all_users(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR))
+    db: sqlite3.Connection = Depends(get_db),
+    _: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR))
 ):
-    return db.query(User).all()
+    users = db.execute("SELECT * FROM users").fetchall()
+    return [dict(u) for u in users]
 
 @router.patch("/me", response_model=dict)
 def update_current_user(
     update_data: schemas.UserUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    from ..security import verify_password, get_password_hash, create_access_token
-    if not verify_password(update_data.old_password, current_user.hashed_password):
+    if not verify_password(update_data.old_password, current_user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Incorrect current password")
         
     if update_data.username:
-        existing = db.query(User).filter(User.username == update_data.username).first()
-        if existing and existing.id != current_user.id:
+        existing = db.execute("SELECT id FROM users WHERE username = ?", (update_data.username,)).fetchone()
+        if existing and existing["id"] != current_user["id"]:
             raise HTTPException(status_code=400, detail="Username already taken")
-        current_user.username = update_data.username
+        current_user["username"] = update_data.username
         
     if update_data.new_password:
-        current_user.hashed_password = get_password_hash(update_data.new_password)
+        current_user["hashed_password"] = get_password_hash(update_data.new_password)
         
+    db.execute(
+        "UPDATE users SET username = ?, hashed_password = ? WHERE id = ?",
+        (current_user["username"], current_user["hashed_password"], current_user["id"])
+    )
     db.commit()
-    db.refresh(current_user)
     
-    new_token = create_access_token({"sub": current_user.username, "role": current_user.role})
-    return {"access_token": new_token, "user": schemas.UserRead.model_validate(current_user).model_dump()}
+    new_token = create_access_token({"sub": current_user["username"], "role": current_user["role"]})
+    return {"access_token": new_token, "user": current_user}
 
 @router.post("/register", response_model=schemas.UserRead, status_code=status.HTTP_201_CREATED)
 def register_user(
     user_in: schemas.UserCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
+    db: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
 ):
-    from ..security import get_password_hash
-    if db.query(User).filter(User.username == user_in.username).first():
+    existing_username = db.execute("SELECT id FROM users WHERE username = ?", (user_in.username,)).fetchone()
+    if existing_username:
         raise HTTPException(status_code=400, detail="Username already registered")
         
-    if db.query(User).filter(func.lower(User.full_name) == user_in.full_name.lower(), User.role == user_in.role).first():
+    existing_name = db.execute(
+        "SELECT id FROM users WHERE lower(full_name) = ? AND role = ?", 
+        (user_in.full_name.lower(), user_in.role.value)
+    ).fetchone()
+    if existing_name:
         raise HTTPException(status_code=400, detail=f"A user with the name '{user_in.full_name}' is already registered as a {user_in.role.value}")
     
-    new_user = User(
-        username=user_in.username,
-        full_name=user_in.full_name,
-        role=user_in.role,
-        hashed_password=get_password_hash(user_in.password),
-        teaching_title=user_in.teaching_title,
+    hashed_pw = get_password_hash(user_in.password)
+    
+    cursor = db.execute(
+        "INSERT INTO users (username, full_name, hashed_password, role, teaching_title) VALUES (?, ?, ?, ?, ?)",
+        (user_in.username, user_in.full_name, hashed_pw, user_in.role.value, user_in.teaching_title)
     )
-    db.add(new_user)
     db.commit()
-    db.refresh(new_user)
-    return new_user
+    
+    new_user = db.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return dict(new_user)
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
+    db: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.DIRECTOR)),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.execute("SELECT id, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if user.id == current_user.id:
+    if user["id"] == current_user["id"]:
         raise HTTPException(status_code=400, detail="Cannot delete your own active session")
         
-    from ..models import Student, ClassRoom
-    if user.role == UserRole.TEACHER:
-        db.query(ClassRoom).filter(ClassRoom.teacher_id == user.id).update({ClassRoom.teacher_id: None})
-        db.query(Student).filter(Student.teacher_id == user.id).update({Student.teacher_id: None})
+    if user["role"] == UserRole.TEACHER.value:
+        db.execute("UPDATE classes SET teacher_id = NULL WHERE teacher_id = ?", (user["id"],))
+        db.execute("UPDATE students SET teacher_id = NULL WHERE teacher_id = ?", (user["id"],))
             
-    if user.role == UserRole.PARENT:
-        db.query(Student).filter(Student.parent_id == user.id).update({Student.parent_id: None})
+    if user["role"] == UserRole.PARENT.value:
+        db.execute("UPDATE students SET parent_id = NULL WHERE parent_id = ?", (user["id"],))
             
-    db.delete(user)
+    db.execute("DELETE FROM users WHERE id = ?", (user["id"],))
     db.commit()
     return None
-

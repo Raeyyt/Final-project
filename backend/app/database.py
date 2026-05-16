@@ -1,29 +1,28 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+import sqlite3
+from typing import Generator
+import os
 
 from .config import settings
 
-
-class Base(DeclarativeBase):
-    pass
-
-
-def _engine_kwargs():
-    url = settings.database_url
-    if url.startswith("sqlite"):
-        return {"connect_args": {"check_same_thread": False}}
-    return {"pool_pre_ping": True}
+# Since the user requested saving as school.db in the main directory
+# We'll resolve the path relative to this file to point to the root directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.path.join(BASE_DIR, "school.db")
 
 
-engine = create_engine(settings.database_url, **_engine_kwargs())
-
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-
-def get_db():
-    db = SessionLocal()
+def get_db() -> Generator[sqlite3.Connection, None, None]:
+    """
+    Dependency that yields a raw sqlite3 connection with dict-like rows
+    and foreign keys enabled.
+    """
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
     try:
-        yield db
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        db.close()
-
+        conn.close()

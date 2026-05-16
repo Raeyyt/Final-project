@@ -52,7 +52,6 @@ class UserUpdate(BaseModel):
 
 class ClassBase(BaseModel):
     name: str
-    description: Optional[str] = None
     teacher_id: Optional[int] = None
 
 
@@ -61,7 +60,6 @@ class ClassCreate(ClassBase):
 
 class ClassUpdate(BaseModel):
     name: Optional[str] = None
-    description: Optional[str] = None
     teacher_id: Optional[int] = None
 
 
@@ -81,11 +79,9 @@ class StudentBase(BaseModel):
 
 
 class StudentCreate(StudentBase):
-    """When ``create_registration_invoice`` is true, parent and fee amount are required."""
+    """When ``create_registration_invoice`` is true, parent is required."""
 
     create_registration_invoice: bool = False
-    registration_fee_amount: Optional[float] = None
-    registration_due_date: Optional[dt_date] = None
 
     @model_validator(mode="after")
     def registration_invoice_requires_parent_and_amount(self):
@@ -94,8 +90,6 @@ class StudentCreate(StudentBase):
                 raise ValueError(
                     "Link a parent account before creating a registration invoice so they can pay in the parent portal."
                 )
-            if self.registration_fee_amount is None or self.registration_fee_amount <= 0:
-                raise ValueError("Registration fee amount must be greater than zero.")
         return self
 
 
@@ -162,6 +156,8 @@ class PaymentCreate(PaymentBase):
 class PaymentUpdate(BaseModel):
     amount_paid: Optional[float] = None
     status: Optional[PaymentStatus] = None
+    amount_due: Optional[float] = None
+    due_date: Optional[dt_date] = None
 
 
 class PaymentRead(PaymentBase):
@@ -252,6 +248,7 @@ class FinancialReportRead(FinancialReportBase):
 class AnnouncementCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     body: str = Field(..., min_length=1, max_length=4000)
+    target_class_id: Optional[int] = None
 
 
 class AnnouncementRead(BaseModel):
@@ -260,6 +257,8 @@ class AnnouncementRead(BaseModel):
     body: str
     created_at: datetime
     author_name: str
+    target_class_id: Optional[int] = None
+    target_class_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

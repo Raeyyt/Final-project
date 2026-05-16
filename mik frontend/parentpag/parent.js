@@ -362,8 +362,9 @@ async function loadAnnouncements() {
     el.innerHTML = data
         .map((a) => {
             const when = new Date(a.created_at).toLocaleString();
+            const targetBadge = a.target_class_name ? `<span style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:12px; font-size:12px; margin-left:10px;">Class: ${escapeHtml(a.target_class_name)}</span>` : `<span style="background:#f1f5f9; color:#475569; padding:2px 8px; border-radius:12px; font-size:12px; margin-left:10px;">School-wide</span>`;
             return `<article class="parent-announce-card">
-            <header><strong>${escapeHtml(a.title)}</strong><span>${escapeHtml(when)} · ${escapeHtml(a.author_name)}</span></header>
+            <header><strong>${escapeHtml(a.title)}</strong>${targetBadge}<span>${escapeHtml(when)} · ${escapeHtml(a.author_name)}</span></header>
             <div class="parent-announce-body">${escapeHtml(a.body)}</div>
         </article>`;
         })

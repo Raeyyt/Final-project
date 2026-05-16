@@ -23,7 +23,10 @@
                     <span>Finance Portal</span>
                 </li>
                 <li onclick="showSection('students')" id="nav-stud">
-                    <span>Students</span>
+                    <span>Quarterly Invoices</span>
+                </li>
+                <li onclick="showSection('registrations')" id="nav-reg">
+                    <span>Student Registrations</span>
                 </li>
                 <li onclick="showSection('reports')" id="nav-rep">
                     <span>Reports</span>
@@ -169,6 +172,27 @@
                             <button onclick="changePage('next')" id="btn-next" class="page-btn active">Next</button>
                         </div>
                     </div>
+                </section>
+            </div>
+
+            <div id="registrations-section" class="content-view" style="display:none;">
+                <h2>Pending Student Registrations</h2>
+                <p class="fee-card-intro" style="margin-bottom:20px;">Set the registration fee and due date for newly admitted students to activate their invoices.</p>
+                <section class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>STUDENT</th>
+                                <th>CLASS</th>
+                                <th>FEE AMOUNT (ETB)</th>
+                                <th>DUE DATE</th>
+                                <th>ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="registrationsBody">
+                            <tr><td colspan="5" style="text-align:center; padding:20px;">Loading pending registrations...</td></tr>
+                        </tbody>
+                    </table>
                 </section>
             </div>
 
